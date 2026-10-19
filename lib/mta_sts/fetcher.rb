@@ -203,7 +203,9 @@ module MtaSts
       end
 
       def connection(host, address)
-        Net::HTTP.new(host, PORT).tap do |http|
+        # The nil proxy ignores http_proxy: a proxy would resolve the name again,
+        # and the connection would no longer go to the address judged.
+        Net::HTTP.new(host, PORT, nil).tap do |http|
           # Dial the address already judged; the name stays behind for SNI, the
           # Host header, and the certificate the whole fetch rests on.
           http.ipaddr = address

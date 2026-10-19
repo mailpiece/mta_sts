@@ -351,6 +351,21 @@ class MtaSts::FetcherTest < MtaSts::TestCase
     assert_equal "93.184.216.34", http.ipaddr
   end
 
+  # A proxy from the environment would resolve the name again and dial whatever
+  # it got, so the connection takes none.
+  def test_the_connection_ignores_a_proxy_from_the_environment
+    saved = ENV.slice("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY")
+    %w[ http_proxy HTTP_PROXY https_proxy HTTPS_PROXY ].each { |key| ENV[key] = "http://proxy.internal:3128" }
+
+    http = MtaSts::Fetcher.new.send(:connection, POLICY_HOST, "93.184.216.34")
+
+    refute http.proxy?
+    assert_equal "93.184.216.34", http.ipaddr
+  ensure
+    %w[ http_proxy HTTP_PROXY https_proxy HTTPS_PROXY ].each { |key| ENV.delete(key) }
+    saved.each { |key, value| ENV[key] = value }
+  end
+
   # Where the policy host resolves is chosen by whoever is being sent mail;
   # reaching an inside address is the fetch a stranger would otherwise get for free.
   def test_an_address_the_caller_refuses_is_never_dialled

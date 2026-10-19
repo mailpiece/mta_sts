@@ -138,10 +138,11 @@ module MtaSts
         # A policy host with several addresses isn't written off because the first
         # is down — the domain published all of them, and any one serves.
         permitted_addresses(host).each do |address|
-          break if monotonic_now > deadline
+          remaining = deadline - monotonic_now
+          break unless remaining.positive?
 
           begin
-            return policy_from(host, address, deadline)
+            return policy_from(host, address, deadline, remaining)
           rescue Unanswered => unanswered
             failure = unanswered.failure
           end
@@ -168,8 +169,8 @@ module MtaSts
         raise Error, "couldn't resolve #{host}: #{error.message}"
       end
 
-      def policy_from(host, address, deadline)
-        with_response(host, address) do |response|
+      def policy_from(host, address, deadline, remaining)
+        with_response(host, address, remaining) do |response|
           if response.is_a?(Net::HTTPOK)
             body_from(response, host, deadline)
           else
@@ -179,23 +180,28 @@ module MtaSts
         end
       end
 
-      # `answered` is the whole distinction the attempt loop turns on
-      def with_response(host, address)
+      # `answered` is the whole distinction the attempt loop turns on. read_timeout
+      # renews with every header line, so the deadline also bounds the headers.
+      def with_response(host, address, remaining)
         answered = false
         result = nil
 
-        connection(host, address).start do |http|
-          http.request(policy_request) do |response|
-            answered = true
-            result = yield response
+        ::Timeout.timeout(remaining) do
+          connection(host, address).start do |http|
+            http.request(policy_request) do |response|
+              answered = true
+              result = yield response
+            end
           end
         end
 
         result
       rescue OpenSSL::SSL::SSLError => error
         raise attempt_failure(answered, CertificateError.new("#{host} presented a certificate that didn't verify: #{error.message}"))
-      rescue Net::OpenTimeout, Net::ReadTimeout, ::Timeout::Error
+      rescue Net::OpenTimeout, Net::ReadTimeout
         raise attempt_failure(answered, Timeout.new("timed out fetching the policy from #{host}"))
+      rescue ::Timeout::Error
+        raise attempt_failure(answered, Timeout.new("#{host} took longer than #{@total_timeout} seconds to send the policy"))
       rescue Net::HTTPBadResponse, Net::ProtocolError, Zlib::Error => error
         raise attempt_failure(answered, HttpError.new("#{host} answered with malformed HTTP: #{error.message}"))
       rescue SystemCallError, SocketError, IOError, EOFError => error

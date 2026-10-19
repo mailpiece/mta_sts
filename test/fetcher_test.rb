@@ -16,13 +16,14 @@ class MtaSts::FetcherTest < MtaSts::TestCase
   class PolicyServer
     attr_reader :cert_store, :requests
 
-    def initialize(hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil)
+    def initialize(hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil, dribble_headers: nil)
       @certificate, @key = self.class.self_signed(hostname)
       @cert_store = OpenSSL::X509::Store.new
       @cert_store.add_cert(@certificate) if trusted
       @response = response
       @hang = hang
       @dribble = dribble
+      @dribble_headers = dribble_headers
       @requests = []
       @server = TCPServer.new("127.0.0.1", 0)
       @thread = Thread.new { serve }
@@ -100,7 +101,9 @@ class MtaSts::FetcherTest < MtaSts::TestCase
       end
 
       def answer(socket)
-        if @dribble
+        if @dribble_headers
+          dribble_headers(socket)
+        elsif @dribble
           dribble(socket)
         else
           socket.write(@response)
@@ -121,6 +124,18 @@ class MtaSts::FetcherTest < MtaSts::TestCase
         end
 
         socket.close
+      end
+
+      # A status line, then header lines without end, each pause shorter than
+      # `read_timeout`.
+      def dribble_headers(socket)
+        socket.write("HTTP/1.1 200 OK\r\n")
+
+        until @closing
+          socket.write("X-Padding: x\r\n")
+          socket.flush
+          sleep @dribble_headers
+        end
       end
 
       def read_request(socket)
@@ -306,6 +321,18 @@ class MtaSts::FetcherTest < MtaSts::TestCase
 
     assert_includes error.message, POLICY_HOST
     assert_includes error.message, "0.3 seconds"
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 5
+  end
+
+  def test_a_policy_host_that_dribbles_headers_gives_up_at_the_deadline
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    error = assert_raises MtaSts::Fetcher::Timeout do
+      fetch(dribble_headers: 0.02, read_timeout: 2, total_timeout: 0.3)
+    end
+
+    assert_includes error.message, "0.3 seconds"
+
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 5
   end
 
@@ -525,8 +552,8 @@ class MtaSts::FetcherTest < MtaSts::TestCase
   end
 
   private
-    def fetch(host: POLICY_HOST, hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil, **options)
-      @server = PolicyServer.new(hostname: hostname, trusted: trusted, response: response, hang: hang, dribble: dribble)
+    def fetch(host: POLICY_HOST, hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil, dribble_headers: nil, **options)
+      @server = PolicyServer.new(hostname: hostname, trusted: trusted, response: response, hang: hang, dribble: dribble, dribble_headers: dribble_headers)
 
       LocalFetcher.new(server: @server, **options).fetch(host)
     end

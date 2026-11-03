@@ -144,7 +144,7 @@ Skip that round trip and §5.1 doesn't apply. Three rules govern what comes back
 - A temporary failure keeps a policy that hasn't expired
 - A fetched `mode: none` replaces it immediately
 
-A policy also carries the domain it was fetched for. Handing back another domain's policy under the wrong key is ignored rather than enforced. Store that too when you persist:
+A policy also carries the domain it was fetched for. Handing back another domain's policy under the wrong key is ignored rather than enforced, but a policy without a domain applies to any recipient it's handed back for. Store the domain too when you persist:
 
 ```ruby
 row = { body: policy.to_s, id: policy.id, domain: policy.domain, fetched_at: policy.fetched_at }
@@ -228,7 +228,7 @@ MtaSts::Policy.parse(File.read("mta-sts.txt"))
 ## What It Does Not Check
 
 - **Certificate revocation.** `Net::HTTP` doesn't check it, and this library doesn't wire up OCSP or CRL. Pass your own `fetcher` if you need it.
-- **The address the policy host resolves to.** Fetched at whatever address DNS returns. The certificate check is what protects you here.
+- **A NAT64 prefix of the network's own.** The address check reads through the well-known `64:ff9b::/96` prefix, but a network-specific one looks like any public address. Pass your own `permitted:` if you use one.
 - **DANE.** A separate mechanism needing DNSSEC validation and the peer certificate mid-handshake, which this library never sees.
 - **TLSRPT report generation or submission.** This library finds the `rua`; building and sending aggregate reports is the application's job.
 - **Anything about the SMTP connection.** This library opens one socket, to fetch a policy over HTTPS. It never speaks SMTP.

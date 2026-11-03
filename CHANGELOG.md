@@ -4,6 +4,7 @@
 
 - A malformed `Content-Length` is a failed fetch rather than an exception.
 - The fetch reads at most 128 KB, headers included.
+- A name too long for DNS is no longer converted from Unicode.
 
 ## 0.6.0
 

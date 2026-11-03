@@ -202,7 +202,7 @@ module MtaSts
         raise attempt_failure(answered, Timeout.new("timed out fetching the policy from #{host}"))
       rescue ::Timeout::Error
         raise attempt_failure(answered, Timeout.new("#{host} took longer than #{@total_timeout} seconds to send the policy"))
-      rescue Net::HTTPBadResponse, Net::ProtocolError, Zlib::Error => error
+      rescue Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error => error
         raise attempt_failure(answered, HttpError.new("#{host} answered with malformed HTTP: #{error.message}"))
       rescue SystemCallError, SocketError, IOError, EOFError => error
         raise attempt_failure(answered, Error.new("couldn't reach #{host}: #{error.message}"))

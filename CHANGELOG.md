@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A malformed `Content-Length` is a failed fetch rather than an exception.
+
 ## 0.6.0
 
 - The fetch ignores a proxy from the environment.

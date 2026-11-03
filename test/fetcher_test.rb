@@ -267,6 +267,14 @@ class MtaSts::FetcherTest < MtaSts::TestCase
     assert_includes error.message, POLICY_HOST
   end
 
+  def test_a_content_length_that_is_not_a_number_is_a_fetch_error_rather_than_an_escaped_exception
+    error = assert_raises MtaSts::Fetcher::HttpError do
+      fetch(response: PolicyServer.response("200 OK", POLICY, headers: { "Content-Length" => "abc" }))
+    end
+
+    assert_includes error.message, POLICY_HOST
+  end
+
   # The wire hands over raw bytes; read them as UTF-8 or a policy naming its
   # mx as a U-label keeps bytes that can never match a normalized hostname.
   def test_the_body_arrives_as_utf_8_so_a_u_label_mx_name_can_match

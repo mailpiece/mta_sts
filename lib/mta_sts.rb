@@ -18,11 +18,15 @@ module MtaSts
   ID_FIELD = /\Aid=(.*)\z/
   # RFC 8461 §3.1 ABNF: sts-id = 1*32(ALPHA / DIGIT)
   STS_ID = /\A[a-zA-Z0-9]{1,32}\z/
+  # LDH labels of at most 63, at most 253 in all; xn-- labels are LDH too
+  HOSTNAME = /\A(?=.{1,253}\z)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})*\z/
 
   class << self
     # `known:` is required so omitting it is a decision, not an accident (§5.1).
     def lookup(domain, known:, resolver: MailResolver::Resolver.new, fetcher: Fetcher.new, now: Time.now)
       domain = Policy.normalize(recipient_domain(domain))
+      return Result.new(status: "none", comment: not_a_hostname(domain)) unless domain.match?(HOSTNAME)
+
       held = usable(known, domain, now)
       id = discover(domain, resolver)
 
@@ -37,6 +41,7 @@ module MtaSts
     # RFC 8460 §3
     def reporting(domain, resolver: MailResolver::Resolver.new)
       domain = Policy.normalize(recipient_domain(domain))
+      return Report::Result.new(status: "none", comment: not_a_hostname(domain)) unless domain.match?(HOSTNAME)
 
       case record = sole_record("#{REPORTING_PREFIX}#{domain}", matching: Report::REPORT_RECORD, resolver: resolver)
       when :unreachable then unanswered(domain)
@@ -48,6 +53,11 @@ module MtaSts
     private
       def recipient_domain(domain)
         domain.to_s.split("@").last.to_s
+      end
+
+      # Inspected, so a CR, LF or NUL never reaches the caller's logs
+      def not_a_hostname(domain)
+        "#{domain.inspect} isn't a domain name"
       end
 
       def usable(policy, domain, now)

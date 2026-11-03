@@ -473,6 +473,21 @@ class MtaSts::LookupTest < MtaSts::TestCase
     assert_equal [ "mx.other.example" ], elsewhere.policy.mx
   end
 
+  # A NUL in the name raises at the TLS handshake, and CRLF would carry into
+  # the caller's logs through the comment.
+  def test_a_domain_that_is_not_a_hostname_is_none_without_a_lookup
+    NOT_HOSTNAMES.each do |domain|
+      resolver = resolver_for("_mta-sts.#{domain}" => { txt: [ "v=STSv1; id=#{POLICY_ID}" ] })
+      fetcher = fetcher_for("mta-sts.#{domain}" => POLICY_BODY)
+
+      result = MtaSts.lookup(domain, known: nil, resolver: resolver, fetcher: fetcher, now: NOW)
+
+      assert result.no_record?, "expected #{domain.inspect} to be none"
+      assert_empty resolver.queries
+      refute_match(/[\0\r\n]/, result.comment)
+    end
+  end
+
   private
     def lookup(domain: "example.com", zone: discovery, bodies: { "mta-sts.example.com" => POLICY_BODY },
                known: nil, fetcher: nil, now: NOW)

@@ -10,6 +10,8 @@ module MtaSts
     WILDCARD = "*."
     TERMINATOR = /\r?\n/ # RFC 8461 §3.2 ABNF: sts-policy-term = LF / CRLF
     DIGITS = /\A\d+\z/
+    MAX_LABEL_LENGTH = 63  # RFC 1035 §2.3.4
+    MAX_NAME_LENGTH = 253
 
     class << self
       def parse(text, id: nil, domain: nil, fetched_at: Time.now)
@@ -67,10 +69,20 @@ module MtaSts
           name.valid_encoding? ? name : name.scrub
         end
 
+        # Punycode is quadratic in a label's length, and a name past the DNS
+        # limits names no host DNS can carry.
         def ascii(name)
-          name.ascii_only? ? name : SimpleIDN.to_ascii(name)
+          if name.ascii_only? || beyond_dns_limits?(name)
+            name
+          else
+            SimpleIDN.to_ascii(name)
+          end
         rescue StandardError
           name
+        end
+
+        def beyond_dns_limits?(name)
+          name.length > MAX_NAME_LENGTH || name.split(".").any? { |label| label.length > MAX_LABEL_LENGTH }
         end
     end
 

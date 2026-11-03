@@ -219,6 +219,18 @@ class MtaSts::ReportingTest < MtaSts::TestCase
     assert_nil spaced.policy
   end
 
+  def test_a_domain_that_is_not_a_hostname_is_none_without_a_lookup
+    NOT_HOSTNAMES.each do |domain|
+      resolver = resolver_for("_smtp._tls.#{domain}" => { txt: [ RECORD ] })
+
+      result = MtaSts.reporting(domain, resolver: resolver)
+
+      assert result.no_record?, "expected #{domain.inspect} to be none"
+      assert_empty resolver.queries
+      refute_match(/[\0\r\n]/, result.comment)
+    end
+  end
+
   private
     def reporting(domain: "example.com", zone: tlsrpt(RECORD))
       MtaSts.reporting(domain, resolver: resolver_for(zone))

@@ -280,6 +280,22 @@ class MtaSts::PolicyTest < MtaSts::TestCase
     refute policy(mx: [ "münchen.example" ]).allows?("xn--brln-loa.example")
   end
 
+  # Punycode costs grow with the square of a label's length, and no name past
+  # the DNS limits names a host DNS can carry.
+  def test_a_label_too_long_for_dns_is_left_unconverted_and_matches_nothing
+    host = "#{cjk(64)}.example"
+
+    assert_equal [ host ], policy(mx: [ host ]).mx
+    refute policy(mx: [ host ]).allows?(SimpleIDN.to_ascii(host))
+  end
+
+  def test_a_name_too_long_for_dns_is_left_unconverted_and_matches_nothing
+    host = ([ cjk(60) ] * 5).join(".")
+
+    assert_equal [ host ], policy(mx: [ host ]).mx
+    refute policy(mx: [ host ]).allows?(SimpleIDN.to_ascii(host))
+  end
+
   # Expiry
 
   def test_a_policy_expires_a_max_age_after_it_was_fetched
@@ -359,6 +375,10 @@ class MtaSts::PolicyTest < MtaSts::TestCase
 
     def policy(mode: :enforce, mx: [ "mx.example.com" ], max_age: 604800, domain: nil, fetched_at: Time.utc(2026, 7, 1))
       MtaSts::Policy.new(mode: mode, mx: mx, max_age: max_age, domain: domain, fetched_at: fetched_at)
+    end
+
+    def cjk(length)
+      (0x4e00...0x4e00 + length).to_a.pack("U*")
     end
 
     def enforcing

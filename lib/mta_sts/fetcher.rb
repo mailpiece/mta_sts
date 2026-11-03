@@ -33,6 +33,7 @@ module MtaSts
     # read_timeout renews per read; this one does not — stops a slow-drip body
     TOTAL_TIMEOUT = 30
     MAX_BODY_BYTES = 64 * 1024
+    MAX_HEADER_BYTES = 64 * 1024
     USER_AGENT = "mta_sts/#{VERSION}"
 
     # RFC 8461 §3.2 SHOULD text/plain — reported, not enforced
@@ -49,6 +50,33 @@ module MtaSts
       end
     end
 
+    class Oversized < StandardError; end
+    private_constant :Oversized
+
+    # Net::HTTP reads header lines without limit, so every byte the socket
+    # delivers is counted, headers and body alike.
+    class Connection < Net::HTTP
+      attr_accessor :max_bytes
+
+      module Counted
+        attr_accessor :max_bytes
+
+        private
+          def rbuf_fill
+            before = rbuf_size
+            super
+            @received = @received.to_i + rbuf_size - before
+            raise Oversized if @received > max_bytes
+          end
+      end
+
+      private
+        def on_connect
+          @socket.extend(Counted).max_bytes = max_bytes
+        end
+    end
+    private_constant :Connection
+
     # Special-use IPv4 no policy is published in. RFC 1918, loopback and
     # link-local are left to the IPAddr predicates.
     RESERVED_V4 = %w[
@@ -57,7 +85,7 @@ module MtaSts
     ].map { |range| IPAddr.new(range) }.freeze
 
     RESERVED_V6 = %w[
-      ::/128 64:ff9b:1::/48 100::/64 2001::/32 2001:2::/48 2001:db8::/32
+      ::/128 ::ffff:0:0:0/96 64:ff9b:1::/48 100::/64 2001::/32 2001:2::/48 2001:db8::/32
       2002::/16 fec0::/10 ff00::/8
     ].map { |range| IPAddr.new(range) }.freeze
 
@@ -202,16 +230,19 @@ module MtaSts
         raise attempt_failure(answered, Timeout.new("timed out fetching the policy from #{host}"))
       rescue ::Timeout::Error
         raise attempt_failure(answered, Timeout.new("#{host} took longer than #{@total_timeout} seconds to send the policy"))
-      rescue Net::HTTPBadResponse, Net::ProtocolError, Zlib::Error => error
+      rescue Oversized
+        raise attempt_failure(answered, HttpError.new("#{host} sent more than #{max_response_bytes} bytes"))
+      rescue Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error => error
         raise attempt_failure(answered, HttpError.new("#{host} answered with malformed HTTP: #{error.message}"))
       rescue SystemCallError, SocketError, IOError, EOFError => error
         raise attempt_failure(answered, Error.new("couldn't reach #{host}: #{error.message}"))
       end
 
-      def connection(host, address)
+      def connection(host, address, port = PORT)
         # The nil proxy ignores http_proxy: a proxy would resolve the name again,
         # and the connection would no longer go to the address judged.
-        Net::HTTP.new(host, PORT, nil).tap do |http|
+        Connection.new(host, port, nil).tap do |http|
+          http.max_bytes = max_response_bytes
           # Dial the address already judged; the name stays behind for SNI, the
           # Host header, and the certificate the whole fetch rests on.
           http.ipaddr = address
@@ -222,6 +253,10 @@ module MtaSts
           http.open_timeout = @open_timeout
           http.read_timeout = @read_timeout
         end
+      end
+
+      def max_response_bytes
+        @max_body_bytes + MAX_HEADER_BYTES
       end
 
       # RFC 8461 §3.3 — no HTTP caching; freshness is TXT id + max_age

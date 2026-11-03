@@ -3,6 +3,7 @@
 ## Unreleased
 
 - A malformed `Content-Length` is a failed fetch rather than an exception.
+- The fetch reads at most 128 KB, headers included.
 
 ## 0.6.0
 

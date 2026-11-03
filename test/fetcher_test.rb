@@ -16,7 +16,7 @@ class MtaSts::FetcherTest < MtaSts::TestCase
   class PolicyServer
     attr_reader :cert_store, :requests
 
-    def initialize(hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil, dribble_headers: nil)
+    def initialize(hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil, dribble_headers: nil, flood_headers: false)
       @certificate, @key = self.class.self_signed(hostname)
       @cert_store = OpenSSL::X509::Store.new
       @cert_store.add_cert(@certificate) if trusted
@@ -24,6 +24,7 @@ class MtaSts::FetcherTest < MtaSts::TestCase
       @hang = hang
       @dribble = dribble
       @dribble_headers = dribble_headers
+      @flood_headers = flood_headers
       @requests = []
       @server = TCPServer.new("127.0.0.1", 0)
       @thread = Thread.new { serve }
@@ -101,7 +102,9 @@ class MtaSts::FetcherTest < MtaSts::TestCase
       end
 
       def answer(socket)
-        if @dribble_headers
+        if @flood_headers
+          flood_headers(socket)
+        elsif @dribble_headers
           dribble_headers(socket)
         elsif @dribble
           dribble(socket)
@@ -138,6 +141,12 @@ class MtaSts::FetcherTest < MtaSts::TestCase
         end
       end
 
+      # Header lines without end, as fast as the client takes them.
+      def flood_headers(socket)
+        socket.write("HTTP/1.1 200 OK\r\n")
+        socket.write("X-Padding: #{"x" * 4000}\r\n") until @closing
+      end
+
       def read_request(socket)
         lines = []
         while (line = socket.gets) && line.strip != ""
@@ -158,15 +167,8 @@ class MtaSts::FetcherTest < MtaSts::TestCase
 
     private
       def connection(host, address)
-        Net::HTTP.new(host, address == UP ? @server.port : DEAD_PORT).tap do |http|
-          http.ipaddr = UP
-          http.use_ssl = true
+        super(host, UP, address == UP ? @server.port : DEAD_PORT).tap do |http|
           http.cert_store = @server.cert_store
-          http.verify_mode = OpenSSL::SSL::VERIFY_PEER
-          http.verify_hostname = true
-          http.min_version = OpenSSL::SSL::TLS1_2_VERSION
-          http.open_timeout = @open_timeout
-          http.read_timeout = @read_timeout
         end
       end
   end
@@ -342,6 +344,16 @@ class MtaSts::FetcherTest < MtaSts::TestCase
     assert_includes error.message, "0.3 seconds"
 
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 5
+  end
+
+  # The body cap only starts once the headers are in, and the deadline bounds
+  # time, not memory.
+  def test_a_policy_host_that_floods_headers_is_cut_off_at_the_byte_cap
+    error = assert_raises MtaSts::Fetcher::HttpError do
+      fetch(flood_headers: true, total_timeout: 2)
+    end
+
+    assert_includes error.message, "#{POLICY_HOST} sent more than #{128 * 1024} bytes"
   end
 
   def test_a_deadline_is_no_obstacle_to_a_policy_served_promptly
@@ -560,8 +572,9 @@ class MtaSts::FetcherTest < MtaSts::TestCase
   end
 
   private
-    def fetch(host: POLICY_HOST, hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil, dribble_headers: nil, **options)
-      @server = PolicyServer.new(hostname: hostname, trusted: trusted, response: response, hang: hang, dribble: dribble, dribble_headers: dribble_headers)
+    def fetch(host: POLICY_HOST, hostname: POLICY_HOST, trusted: true, response: nil, hang: false, dribble: nil, dribble_headers: nil, flood_headers: false, **options)
+      @server = PolicyServer.new(hostname: hostname, trusted: trusted, response: response, hang: hang, dribble: dribble,
+        dribble_headers: dribble_headers, flood_headers: flood_headers)
 
       LocalFetcher.new(server: @server, **options).fetch(host)
     end

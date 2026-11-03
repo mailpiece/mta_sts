@@ -440,13 +440,14 @@ class MtaSts::FetcherTest < MtaSts::TestCase
     end
   end
 
-  # Mapped forms are refused outright — no resolver answers with one — and
-  # NAT64 is read through to the IPv4 address it carries.
+  # Mapped and translated forms are refused outright — no resolver answers
+  # with one — and NAT64 is read through to the IPv4 address it carries.
   def test_the_default_judgement_looks_through_an_address_wrapped_in_another
     assert MtaSts::Fetcher.public_address?("64:ff9b::5db8:d822") # NAT64 of 93.184.216.34
 
     %w[ ::ffff:127.0.0.1 ::ffff:93.184.216.34 64:ff9b::7f00:1 64:ff9b::a00:5
-        64:ff9b:1::7f00:1 64:ff9b:1:7f00:0:1:: 2002:7f00:1:: 2001::7f00:1 ].each do |address|
+        64:ff9b:1::7f00:1 64:ff9b:1:7f00:0:1:: 2002:7f00:1:: 2001::7f00:1
+        ::ffff:0:7f00:1 ::ffff:0:a9fe:a9fe ::ffff:0:5db8:d822 ].each do |address|
       refute MtaSts::Fetcher.public_address?(address), "expected #{address} to be refused"
     end
   end
